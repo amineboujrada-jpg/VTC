@@ -44,7 +44,11 @@
   header { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
   header h1 { font-size: 24px; font-weight: 800; margin: 0; letter-spacing: -0.01em; }
   .sub { color: var(--muted); font-size: 13px; }
-  .icon-btn { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; width: 44px; height: 44px; font-size: 19px; }
+  .icon-btn { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; width: 44px; height: 44px; font-size: 19px;
+    display: inline-grid; place-items: center; position: relative; padding: 0; }
+  .hbtns { display: flex; gap: 8px; }
+  .icon-btn.due::after { content: ""; position: absolute; top: 6px; right: 6px; width: 9px; height: 9px; border-radius: 50%;
+    background: var(--fab); box-shadow: 0 0 0 2px var(--surface); }
 
   .tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; background: var(--surface-2); border-radius: 12px; padding: 4px; margin-bottom: 14px; }
   .tab { border: 0; background: transparent; border-radius: 9px; padding: 9px 4px; font-weight: 700; font-size: 14.5px; color: var(--muted); }
@@ -175,7 +179,12 @@
       <h1>VTC</h1>
       <div class="sub" id="status">Hors ligne · données sur ce téléphone</div>
     </div>
-    <button class="icon-btn" id="settings" aria-label="Sauvegarde et réglages">⚙︎</button>
+    <div class="hbtns">
+      <button class="icon-btn" id="quickSave" aria-label="Sauvegarder mes données">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+      </button>
+      <button class="icon-btn" id="settings" aria-label="Sauvegarde et réglages">⚙︎</button>
+    </div>
   </header>
 
   <div class="tabs" role="tablist">
@@ -600,11 +609,9 @@
       b.className = "banner"; b.hidden = false;
       b.innerHTML = `<b>Bienvenue dans ton appli VTC</b>Tu as un fichier de sauvegarde (par exemple ton historique) ? Charge-le pour retrouver toutes tes données.<div class="row"><button class="btn primary small" id="bImport">Restaurer une sauvegarde</button></div>`;
       $("bImport").onclick = () => $("fileIn").click();
-    } else if (old) {
-      b.className = "banner warn"; b.hidden = false;
-      b.innerHTML = `<b>Pense à sauvegarder</b>${esc(lastBackupText())} Si tu perds ton téléphone, tes données partent avec.<div class="row"><button class="btn primary small" id="bExport">Sauvegarder maintenant</button></div>`;
-      $("bExport").onclick = exportData;
     } else b.hidden = true;
+    $("quickSave").classList.toggle("due", !empty && old);
+    $("quickSave").setAttribute("aria-label", !empty && old ? "Sauvegarder mes données (à faire)" : "Sauvegarder mes données");
   }
 
   // ---------- Onglets ----------
@@ -621,6 +628,7 @@
   $("next").onclick = () => { if (curDate < todayIso()) { curDate = iso(addDays(fromIso(curDate), 1)); renderJour(); } };
   $("fab").onclick = () => openDepense(null);
   $("settings").onclick = openSettings;
+  $("quickSave").onclick = exportData;
 
   // Nouveau jour quand l'appli revient au premier plan
   document.addEventListener("visibilitychange", () => {
