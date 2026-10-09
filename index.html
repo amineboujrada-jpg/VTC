@@ -1,0 +1,648 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>VTC</title>
+<meta name="theme-color" content="#0f1116">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="VTC">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" href="icon-192.png">
+<style>
+  /* Appli téléphone une colonne : onglets Jour / Virements / Stats, panneaux qui montent du bas */
+  :root {
+    --bg: #f3f4f7; --surface: #ffffff; --surface-2: #eceef3; --line: #dadde5;
+    --fg: #151821; --muted: #626a7a; --faint: #a3a9b5;
+    --accent: #2f5bd8; --accent-fg: #ffffff;
+    --net: #157a45; --charge: #b35c00; --danger: #c22a2a;
+    --fab: #f2a614; --fab-fg: #1d1400;
+    --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1116; --surface: #191c24; --surface-2: #222632; --line: #2c3140;
+      --fg: #f1f2f5; --muted: #9aa2b1; --faint: #5d6474;
+      --accent: #4a78f0; --accent-fg: #ffffff;
+      --net: #3ccf7d; --charge: #f2a43a; --danger: #ff6b6b;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; }
+  body { background: var(--bg); color: var(--fg); font-family: var(--font); font-size: 15px; -webkit-text-size-adjust: 100%; overscroll-behavior-y: none; }
+  [hidden] { display: none !important; }
+  .wrap { max-width: 520px; margin: 0 auto; padding-inline: 16px;
+    padding-block: calc(12px + env(safe-area-inset-top, 0px)) calc(100px + env(safe-area-inset-bottom, 0px)); }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  header { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
+  header h1 { font-size: 24px; font-weight: 800; margin: 0; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); font-size: 13px; }
+  .icon-btn { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; width: 44px; height: 44px; font-size: 19px; }
+
+  .tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; background: var(--surface-2); border-radius: 12px; padding: 4px; margin-bottom: 14px; }
+  .tab { border: 0; background: transparent; border-radius: 9px; padding: 9px 4px; font-weight: 700; font-size: 14.5px; color: var(--muted); }
+  .tab[aria-selected="true"] { background: var(--surface); color: var(--fg); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+
+  .banner { border: 1px solid var(--line); background: var(--surface); border-radius: 14px; padding: 12px 14px; margin-bottom: 14px; font-size: 14px; line-height: 1.45; }
+  .banner b { display: block; margin-bottom: 2px; }
+  .banner.warn { border-color: var(--charge); }
+  .banner .row { margin-top: 10px; }
+
+  .daynav { display: grid; grid-template-columns: 44px 1fr 44px; gap: 8px; align-items: center; margin-bottom: 12px; }
+  .daynav .d { text-align: center; font-weight: 700; font-size: 16px; text-transform: capitalize; }
+  .daynav .d small { display: block; font-weight: 500; color: var(--accent); font-size: 12.5px; text-transform: none; }
+  .daynav .d small button { border: 0; background: none; color: var(--accent); font-weight: 600; padding: 2px 6px; }
+
+  .summary { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .sum { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 12px 14px; min-width: 0; }
+  .lbl { font-size: 11.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .07em; font-weight: 600; }
+  .net { font-size: 27px; font-weight: 800; margin: 3px 0 6px; color: var(--net); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+  .net.neg { color: var(--danger); }
+  .det { display: grid; grid-template-columns: auto 1fr; gap: 1px 8px; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .det span:nth-child(even) { text-align: right; color: var(--fg); }
+
+  h2 { font-size: 16px; font-weight: 700; margin: 22px 0 10px; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .grid.two { grid-template-columns: repeat(2, 1fr); }
+  .tile { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px 6px 13px; text-align: center; min-height: 76px; }
+  .tile:active { transform: scale(.97); background: var(--surface-2); }
+  .tile .t { font-size: 12.5px; color: var(--muted); }
+  .tile .v { font-size: 17px; font-weight: 700; margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .tile.charge .v { color: var(--charge); }
+  .tile.empty .v { color: var(--faint); font-weight: 500; }
+  .tile.total { background: var(--surface-2); cursor: default; }
+  .tile.total .v { color: var(--net); }
+  .section-label { font-size: 11.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .07em; font-weight: 600; margin: 12px 0 6px; }
+
+  .list { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+  .item { display: flex; justify-content: space-between; gap: 10px; padding: 11px 14px; border: 0; border-top: 1px solid var(--line); font-size: 14px; width: 100%; background: none; text-align: left; }
+  .item:first-child { border-top: 0; }
+  .item div { min-width: 0; }
+  .item small { color: var(--muted); display: block; font-size: 12.5px; margin-top: 1px; }
+  .item b { color: var(--charge); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .item.empty { color: var(--muted); }
+
+  .fab { position: fixed; left: 16px; right: 16px; bottom: calc(14px + env(safe-area-inset-bottom, 0px)); max-width: 488px; margin: 0 auto;
+    background: var(--fab); color: var(--fab-fg); border: 0; border-radius: 16px; padding: 16px; font-size: 16px; font-weight: 800; z-index: 5;
+    box-shadow: 0 6px 20px rgba(0,0,0,.18); }
+
+  .wk-list { display: grid; gap: 8px; }
+  .wk { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 4px 10px; background: var(--surface); border: 1px solid var(--line);
+    border-radius: 14px; padding: 12px 14px; text-align: left; width: 100%; }
+  .wk.current { border-color: var(--accent); }
+  .wk .name { font-weight: 700; font-size: 15px; }
+  .wk .per { color: var(--muted); font-size: 12.5px; }
+  .wk .amt { font-weight: 800; font-size: 17px; text-align: right; font-variant-numeric: tabular-nums; }
+  .pill { display: inline-block; float: right; font-size: 11.5px; font-weight: 700; border-radius: 999px; padding: 3px 9px; border: 1px solid var(--line); color: var(--muted); margin-top: 3px; }
+  .pill.ok { color: var(--net); border-color: var(--net); }
+  .pill.wait { color: var(--charge); border-color: var(--charge); }
+
+  .kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .kpi { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 11px 13px; min-width: 0; }
+  .kpi .v { font-size: 20px; font-weight: 800; margin-top: 3px; font-variant-numeric: tabular-nums; }
+  .kpi.main { grid-column: 1 / -1; }
+  .kpi.main .v { font-size: 28px; color: var(--net); }
+  .tbl-wrap { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+  th, td { padding: 9px 8px; text-align: right; border-top: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; border-top: 0; }
+  th:first-child, td:first-child { text-align: left; }
+  td.n { font-weight: 700; color: var(--net); }
+  td.n.neg { color: var(--danger); }
+  tr.tot td { font-weight: 800; background: var(--surface-2); }
+  .rowline { padding: 10px 14px; border-top: 1px solid var(--line); }
+  .rowline:first-child { border-top: 0; }
+  .rowline .top { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; }
+  .rowline .top b { font-variant-numeric: tabular-nums; }
+  .rowline small { color: var(--muted); }
+  .bar { height: 6px; background: var(--surface-2); border-radius: 3px; margin-top: 5px; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+  .bar.ch i { background: var(--charge); }
+
+  .backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 10; }
+  .sheet { position: fixed; left: 0; right: 0; bottom: 0; background: var(--surface); z-index: 11; max-width: 520px; margin: 0 auto;
+    border-radius: 20px 20px 0 0; padding: 18px 16px calc(18px + env(safe-area-inset-bottom, 0px));
+    transform: translateY(105%); transition: transform .2s ease; max-height: 92vh; overflow-y: auto; visibility: hidden; }
+  .sheet.open { transform: none; visibility: visible; }
+  .sheet h3 { margin: 0 0 3px; font-size: 19px; }
+  .sheet .cur { color: var(--muted); font-size: 13.5px; margin-bottom: 12px; line-height: 1.4; }
+  .sheet input, .sheet select { width: 100%; background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 12px;
+    padding: 14px; font: inherit; font-size: 22px; margin-bottom: 10px; font-variant-numeric: tabular-nums; }
+  .sheet select, .sheet input.small { font-size: 16px; }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .chip { background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px; padding: 8px 15px; font-size: 15px; font-weight: 600; }
+  .row { display: flex; gap: 8px; }
+  .btn { flex: 1; border: 0; border-radius: 12px; padding: 15px; font-size: 16px; font-weight: 700; }
+  .btn.primary { background: var(--accent); color: var(--accent-fg); }
+  .btn.ghost { background: var(--surface-2); border: 1px solid var(--line); }
+  .btn.danger { background: var(--danger); color: #fff; }
+  .btn.small { padding: 10px 12px; font-size: 14.5px; }
+  .pair { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .pair small { color: var(--muted); font-size: 12px; }
+  .pair input { font-size: 17px; padding: 12px 10px; margin-bottom: 6px; }
+  .pair-lbl { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; margin: 6px 0 5px; }
+  .calc { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; background: var(--bg); border-radius: 12px; padding: 12px 14px; margin: 4px 0 12px; font-size: 14px; font-variant-numeric: tabular-nums; }
+  .calc span:nth-child(even) { text-align: right; }
+  .calc .big { font-weight: 800; font-size: 17px; color: var(--net); }
+  .toggle { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: var(--bg); border: 1px solid var(--line);
+    border-radius: 12px; padding: 13px 14px; margin-bottom: 12px; font-weight: 600; width: 100%; }
+  .toggle .sw { width: 46px; height: 28px; border-radius: 999px; background: var(--line); position: relative; flex: none; transition: background .15s; }
+  .toggle .sw::after { content: ""; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #fff; transition: left .15s; }
+  .toggle[aria-pressed="true"] .sw { background: var(--net); }
+  .toggle[aria-pressed="true"] .sw::after { left: 21px; }
+  .stack { display: grid; gap: 8px; }
+  .note { color: var(--muted); font-size: 13px; line-height: 1.45; margin: 10px 0 0; }
+
+  .toast { position: fixed; left: 50%; top: calc(12px + env(safe-area-inset-top, 0px)); transform: translate(-50%, -160%);
+    background: var(--net); color: #fff; padding: 10px 16px; border-radius: 12px; font-weight: 700; font-size: 14px; z-index: 20;
+    transition: transform .2s; max-width: calc(100% - 32px); }
+  .toast.show { transform: translate(-50%, 0); }
+  .toast.err { background: var(--danger); }
+  @media (prefers-reduced-motion: reduce) { .sheet, .toast, .toggle .sw, .toggle .sw::after { transition: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>VTC</h1>
+      <div class="sub" id="status">Hors ligne · données sur ce téléphone</div>
+    </div>
+    <button class="icon-btn" id="settings" aria-label="Sauvegarde et réglages">⚙︎</button>
+  </header>
+
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" id="t-jour" aria-selected="true">Jour</button>
+    <button class="tab" role="tab" id="t-vir" aria-selected="false">Virements</button>
+    <button class="tab" role="tab" id="t-stats" aria-selected="false">Stats</button>
+  </div>
+
+  <div id="banner" hidden></div>
+
+  <section id="p-jour">
+    <div class="daynav">
+      <button class="icon-btn" id="prev" aria-label="Jour précédent">‹</button>
+      <div class="d" id="dayLabel"></div>
+      <button class="icon-btn" id="next" aria-label="Jour suivant">›</button>
+    </div>
+    <div class="summary">
+      <div class="sum"><div class="lbl" id="wLbl">Semaine</div><div class="net" id="wNet">0 €</div><div class="det" id="wDet"></div></div>
+      <div class="sum"><div class="lbl" id="mLbl">Mois</div><div class="net" id="mNet">0 €</div><div class="det" id="mDet"></div></div>
+    </div>
+    <h2>Recettes du jour</h2>
+    <div id="tiles"></div>
+    <h2>Dernières dépenses</h2>
+    <div class="list" id="deps"></div>
+  </section>
+
+  <section id="p-vir" hidden>
+    <h2 style="margin-top:4px">Semaines Baldi</h2>
+    <div class="wk-list" id="wks"></div>
+  </section>
+
+  <section id="p-stats" hidden>
+    <div id="stats"></div>
+  </section>
+</div>
+
+<button class="fab" id="fab">＋ Ajouter une dépense</button>
+<div class="backdrop" id="backdrop" hidden></div>
+<div class="sheet" id="sheet" role="dialog" aria-modal="true"></div>
+<div class="toast" id="toast" role="status"></div>
+<input type="file" id="fileIn" accept="application/json,.json" hidden>
+
+<script>
+(() => {
+  "use strict";
+  // ================= BASE DE DONNÉES (IndexedDB, dans le téléphone) =================
+  const DB_NAME = "vtc", DB_VER = 1;
+  let idb = null;
+  function openDb() {
+    return new Promise((res, rej) => {
+      const r = indexedDB.open(DB_NAME, DB_VER);
+      r.onupgradeneeded = () => {
+        const d = r.result;
+        if (!d.objectStoreNames.contains("days")) d.createObjectStore("days", { keyPath: "date" });
+        if (!d.objectStoreNames.contains("depenses")) d.createObjectStore("depenses", { keyPath: "id" });
+        if (!d.objectStoreNames.contains("weeks")) d.createObjectStore("weeks", { keyPath: "id" });
+        if (!d.objectStoreNames.contains("meta")) d.createObjectStore("meta", { keyPath: "k" });
+      };
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    });
+  }
+  const tx = (store, mode, fn) => new Promise((res, rej) => {
+    const t = idb.transaction(store, mode); const s = t.objectStore(store); const out = fn(s);
+    t.oncomplete = () => res(out && out.result !== undefined ? out.result : undefined); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error);
+  });
+  const getAll = store => tx(store, "readonly", s => s.getAll());
+  const put = (store, v) => tx(store, "readwrite", s => s.put(v));
+  const del = (store, k) => tx(store, "readwrite", s => s.delete(k));
+  async function replaceAll(data) {
+    await new Promise((res, rej) => {
+      const t = idb.transaction(["days", "depenses", "weeks"], "readwrite");
+      ["days", "depenses", "weeks"].forEach(n => t.objectStore(n).clear());
+      (data.days || []).forEach(v => t.objectStore("days").put(v));
+      (data.depenses || []).forEach(v => t.objectStore("depenses").put(v));
+      (data.weeks || []).forEach(v => t.objectStore("weeks").put(v));
+      t.oncomplete = res; t.onerror = () => rej(t.error);
+    });
+  }
+
+  // État en mémoire (copie de la base)
+  const S = { days: new Map(), deps: [], weeks: new Map(), meta: {} };
+  async function loadAll() {
+    const [days, deps, weeks, meta] = await Promise.all([getAll("days"), getAll("depenses"), getAll("weeks"), getAll("meta")]);
+    S.days = new Map(days.map(d => [d.date, d]));
+    S.deps = deps.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+    S.weeks = new Map(weeks.map(w => [w.id, w]));
+    S.meta = Object.fromEntries(meta.map(m => [m.k, m.v]));
+  }
+
+  // ================= DATES =================
+  const pad = n => String(n).padStart(2, "0");
+  const iso = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const fromIso = s => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); };
+  const addDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+  const monday = d => addDays(d, -((d.getDay() + 6) % 7));
+  const todayIso = () => iso(new Date());
+  const MOIS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"];
+  const SHORT = ["Janv.", "Févr.", "Mars", "Avr.", "Mai", "Juin", "Juil.", "Août", "Sept.", "Oct.", "Nov.", "Déc."];
+  const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+  function weekKeyOf(d) { // la semaine appartient au mois de son dimanche
+    const sun = addDays(monday(d), 6);
+    return { y: sun.getFullYear(), m: sun.getMonth() + 1, s: Math.ceil(sun.getDate() / 7), mon: monday(d), sun };
+  }
+  const weekId = k => `${k.y}-${pad(k.m)}-S${k.s}`;
+
+  // ================= FORMAT =================
+  const eur = n => (Math.round(n * 100) / 100).toLocaleString("fr-FR", { minimumFractionDigits: Math.round(n * 100) % 100 ? 2 : 0, maximumFractionDigits: 2 }) + " €";
+  const eur0 = n => Math.round(n).toLocaleString("fr-FR") + " €";
+  const parse = s => Number(String(s).replace(/[\s  €]/g, "").replace(",", "."));
+  const r2 = n => Math.round(n * 100) / 100;
+  const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const $ = id => document.getElementById(id);
+
+  // ================= CALCULS =================
+  const REC = ["uber", "bolt", "heetch", "prive", "pourboire"];
+  const FIELDS = [
+    { k: "uber", t: "Uber", g: "rec" }, { k: "bolt", t: "Bolt", g: "rec" }, { k: "heetch", t: "Heetch", g: "rec" },
+    { k: "prive", t: "Privé (cash)", g: "rec" }, { k: "pourboire", t: "Pourboire", g: "rec" },
+    { k: "carburant", t: "Carburant", g: "ch", charge: true, chips: [20, 30, 40, 50] },
+    { k: "repas", t: "Repas / café", g: "ch", charge: true, chips: [2, 5, 10, 15] },
+    { k: "heures", t: "Heures", g: "ch", unit: "h" }, { k: "km", t: "Km", g: "ch", unit: "km" }
+  ];
+  const CATS = ["Rattachement", "Assurance", "Entretien", "Amende", "Péage / parking", "Équipement", "Autre", "Démarrage"];
+  const v = (o, k) => (o && typeof o[k] === "number" ? o[k] : 0);
+  const recettes = d => REC.reduce((a, k) => a + v(d, k), 0);
+  const dayCharges = d => v(d, "carburant") + v(d, "repas");
+
+  function periodTotals(from, to) { // from/to iso inclus
+    let ca = 0, ch = 0, jours = 0;
+    S.days.forEach(d => { if (d.date >= from && d.date <= to) { const r = recettes(d); ca += r; ch += dayCharges(d); if (r > 0) jours++; } });
+    S.deps.forEach(x => { if (x.cat !== "Démarrage" && x.date >= from && x.date <= to) ch += x.montant; });
+    return { ca: r2(ca), charges: r2(ch), net: r2(ca - ch), jours };
+  }
+  function weekCalc(w) {
+    const ca = w.ca.reduce((a, b) => a + (b || 0), 0), cash = w.cash.reduce((a, b) => a + (b || 0), 0);
+    const frais = ca > 0 ? (typeof w.frais === "number" ? w.frais : 50) : 0;
+    return { ca: r2(ca), cash: r2(cash), frais, vir: r2(ca - cash - frais) };
+  }
+
+  // ================= UI =================
+  function toast(msg, err) {
+    const t = $("toast"); t.textContent = msg; t.className = "toast show" + (err ? " err" : "");
+    clearTimeout(t._h); t._h = setTimeout(() => (t.className = "toast"), 2400);
+  }
+  function openSheet(html, focusId) {
+    const s = $("sheet"); s.innerHTML = html; $("backdrop").hidden = false;
+    requestAnimationFrame(() => s.classList.add("open"));
+    if (focusId) setTimeout(() => { const el = $(focusId); if (el) el.focus(); }, 230);
+  }
+  function closeSheet() { $("sheet").classList.remove("open"); $("backdrop").hidden = true; }
+  $("backdrop").onclick = closeSheet;
+
+  let curDate = todayIso();
+  let tab = "jour";
+
+  function renderSummary(id, o) {
+    const n = $(id + "Net"); n.textContent = eur0(o.net); n.className = "net" + (o.net < 0 ? " neg" : "");
+    const det = $(id + "Det"); det.innerHTML = "";
+    [["CA", eur0(o.ca)], ["Charges", eur0(o.charges)], ["Jours", String(o.jours)]].forEach(([a, b]) => {
+      const s1 = document.createElement("span"); s1.textContent = a; const s2 = document.createElement("span"); s2.textContent = b; det.append(s1, s2);
+    });
+  }
+
+  function renderJour() {
+    const d = fromIso(curDate), isToday = curDate === todayIso();
+    $("dayLabel").innerHTML = `${esc(d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" }))}` +
+      `<small>${isToday ? "Aujourd'hui" : `<button id="goToday">Revenir à aujourd'hui</button>`}</small>`;
+    if (!isToday) $("goToday").onclick = () => { curDate = todayIso(); renderJour(); };
+    $("next").disabled = isToday; $("next").style.opacity = isToday ? .35 : 1;
+
+    const mon = monday(d);
+    $("wLbl").textContent = `Semaine du ${pad(mon.getDate())}/${pad(mon.getMonth() + 1)}`;
+    renderSummary("w", periodTotals(iso(mon), iso(addDays(mon, 6))));
+    $("mLbl").textContent = `${MOIS[d.getMonth()]} ${d.getFullYear()}`;
+    renderSummary("m", periodTotals(iso(new Date(d.getFullYear(), d.getMonth(), 1)), iso(new Date(d.getFullYear(), d.getMonth() + 1, 0))));
+
+    const day = S.days.get(curDate) || {};
+    const tile = f => {
+      const val = v(day, f.k);
+      const txt = f.unit ? (val ? val.toLocaleString("fr-FR") + " " + f.unit : "–") : (val ? eur(val) : "–");
+      return `<button class="tile${f.charge ? " charge" : ""}${val ? "" : " empty"}" data-k="${f.k}"><div class="t">${f.t}</div><div class="v">${txt}</div></button>`;
+    };
+    const rec = recettes(day);
+    $("tiles").innerHTML =
+      `<div class="grid">${FIELDS.filter(f => f.g === "rec").map(tile).join("")}` +
+      `<div class="tile total"><div class="t">Total</div><div class="v">${rec ? eur(rec) : "–"}</div></div></div>` +
+      `<div class="section-label">Dépenses du jour et activité</div>` +
+      `<div class="grid two">${FIELDS.filter(f => f.g === "ch").map(tile).join("")}</div>`;
+    $("tiles").querySelectorAll("button.tile").forEach(b => (b.onclick = () => openField(b.dataset.k)));
+
+    const box = $("deps"); box.innerHTML = "";
+    const recent = S.deps.filter(x => x.cat !== "Démarrage").slice(-6).reverse();
+    if (!recent.length) { box.innerHTML = '<div class="item empty">Aucune dépense. Touche le bouton orange pour en ajouter.</div>'; return; }
+    recent.forEach(x => {
+      const b = document.createElement("button"); b.className = "item";
+      const left = document.createElement("div"); left.textContent = x.desc || x.cat;
+      const sm = document.createElement("small"); const dd = fromIso(x.date); sm.textContent = `${pad(dd.getDate())}/${pad(dd.getMonth() + 1)} · ${x.cat}`; left.appendChild(sm);
+      const amt = document.createElement("b"); amt.textContent = eur(x.montant);
+      b.append(left, amt); b.onclick = () => openDepense(x); box.appendChild(b);
+    });
+  }
+
+  function openField(k) {
+    const f = FIELDS.find(x => x.k === k), cur = v(S.days.get(curDate), k);
+    const curTxt = f.unit ? (cur ? cur + " " + f.unit : "rien") : (cur ? eur(cur) : "rien");
+    openSheet(`
+      <h3>${f.t}</h3>
+      <div class="cur">${esc(cap(fromIso(curDate).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })))} · déjà saisi : ${curTxt}</div>
+      <input id="amt" type="text" inputmode="decimal" autocomplete="off" placeholder="${f.unit === "h" ? "Nombre d'heures" : f.unit === "km" ? "Nombre de km" : "Montant en €"}">
+      ${f.chips ? `<div class="chips">${f.chips.map(c => `<button class="chip" data-v="${c}">${c} €</button>`).join("")}</div>` : ""}
+      <div class="row"><button class="btn primary" id="add">＋ Ajouter</button><button class="btn ghost" id="set">Remplacer</button></div>`, "amt");
+    $("sheet").querySelectorAll(".chip").forEach(c => (c.onclick = () => ($("amt").value = c.dataset.v)));
+    $("add").onclick = () => saveField(f, "add");
+    $("set").onclick = () => saveField(f, "set");
+  }
+  async function saveField(f, mode) {
+    const raw = $("amt").value.trim(), n = parse(raw);
+    if (raw === "" || !isFinite(n)) { toast("Tape un nombre", true); return; }
+    const day = Object.assign({ date: curDate }, S.days.get(curDate) || {});
+    const next = r2(mode === "set" ? n : v(day, f.k) + n);
+    if (next === 0) delete day[f.k]; else day[f.k] = next;
+    try {
+      if (Object.keys(day).length === 1) { await del("days", curDate); S.days.delete(curDate); }
+      else { await put("days", day); S.days.set(curDate, day); }
+      closeSheet(); renderJour();
+      toast(mode === "set" ? `${f.t} : ${f.unit ? next + " " + f.unit : eur(next)}` : `${f.t} +${f.unit ? n : eur(n)}`);
+    } catch (e) { toast("Enregistrement impossible : " + (e && e.message || e), true); }
+  }
+
+  // ---------- Dépenses ----------
+  function baldiLabel(dIso) {
+    const k = weekKeyOf(fromIso(dIso));
+    return `Baldi S${k.s} ${MOIS[k.m - 1]} ${k.y}`;
+  }
+  function openDepense(existing) {
+    const x = existing || null;
+    openSheet(`
+      <h3>${x ? "Modifier la dépense" : "Nouvelle dépense"}</h3>
+      <div class="cur">Date</div>
+      <input id="ddate" class="small" type="date" value="${x ? x.date : curDate}" aria-label="Date">
+      <select id="cat" aria-label="Catégorie">${CATS.map(c => `<option${x && x.cat === c ? " selected" : ""}>${c}</option>`).join("")}</select>
+      <input id="desc" class="small" type="text" placeholder="Description (ex. vidange)" aria-label="Description" value="${x ? esc(x.desc) : ""}">
+      <input id="damt" type="text" inputmode="decimal" autocomplete="off" placeholder="Montant en €" aria-label="Montant" value="${x ? String(x.montant).replace(".", ",") : ""}">
+      <div class="stack">
+        <button class="btn primary" id="saveDep">Enregistrer</button>
+        ${x ? `<button class="btn ghost" id="delDep">Supprimer cette dépense</button>` : ""}
+      </div>`);
+    const defaults = () => {
+      const c = $("cat").value;
+      if (c === "Rattachement") { $("desc").value = baldiLabel($("ddate").value || curDate); $("damt").value = "50"; }
+      else if (c === "Assurance") { $("desc").value = "Assurance"; $("damt").value = "160"; }
+      else { $("desc").value = ""; $("damt").value = ""; }
+    };
+    $("cat").onchange = defaults; if (!x) defaults();
+    $("saveDep").onclick = async () => {
+      const n = parse($("damt").value), date = $("ddate").value;
+      if (!(n > 0)) { toast("Tape un montant", true); return; }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { toast("Choisis une date", true); return; }
+      const rec = { id: x ? x.id : "d" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), date, cat: $("cat").value, desc: $("desc").value.trim() || $("cat").value, montant: r2(n) };
+      try {
+        await put("depenses", rec);
+        S.deps = S.deps.filter(d => d.id !== rec.id).concat(rec).sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+        closeSheet(); renderAll(); toast(x ? "Dépense modifiée" : "Dépense enregistrée");
+      } catch (e) { toast("Enregistrement impossible", true); }
+    };
+    if (x) $("delDep").onclick = () => {
+      const b = $("delDep");
+      if (b.dataset.confirm !== "1") { b.dataset.confirm = "1"; b.className = "btn danger"; b.textContent = "Confirmer la suppression"; return; }
+      del("depenses", x.id).then(() => { S.deps = S.deps.filter(d => d.id !== x.id); closeSheet(); renderAll(); toast("Dépense supprimée"); });
+    };
+  }
+
+  // ---------- Virements ----------
+  function weekList() {
+    const now = weekKeyOf(new Date()), prev = weekKeyOf(addDays(new Date(), -7));
+    const map = new Map(S.weeks);
+    [now, prev].forEach(k => { const id = weekId(k); if (!map.has(id)) map.set(id, { id, y: k.y, m: k.m, s: k.s, ca: [0, 0, 0], cash: [0, 0, 0], recu: false, _new: true }); });
+    return [...map.values()].sort((a, b) => (b.y * 1000 + b.m * 10 + b.s) - (a.y * 1000 + a.m * 10 + a.s)).filter(w => (w.y * 1000 + w.m * 10 + w.s) <= (now.y * 1000 + now.m * 10 + now.s));
+  }
+  const wkName = w => `${cap(MOIS[w.m - 1])} ${w.y} · S${w.s}`;
+  function renderVir() {
+    const box = $("wks"); box.innerHTML = "";
+    const curId = weekId(weekKeyOf(new Date()));
+    weekList().slice(0, 30).forEach(w => {
+      const c = weekCalc(w), filled = c.ca > 0;
+      const b = document.createElement("button"); b.className = "wk" + (w.id === curId ? " current" : "");
+      const pill = !filled ? '<span class="pill">À remplir</span>' : w.recu ? '<span class="pill ok">Reçu</span>' : '<span class="pill wait">En attente</span>';
+      b.innerHTML = `<div><div class="name"></div><div class="per"></div></div><div><div class="amt">${filled ? eur(c.vir) : "–"}</div>${pill}</div>`;
+      b.querySelector(".name").textContent = wkName(w) + (w.id === curId ? " (en cours)" : "");
+      b.querySelector(".per").textContent = filled ? `CA ${eur0(c.ca)} · cash ${eur0(c.cash)}` : "Montants de la semaine à saisir";
+      b.onclick = () => openVir(w); box.appendChild(b);
+    });
+  }
+  function openVir(w) {
+    const val = x => (x ? String(x).replace(".", ",") : "");
+    const inp = (id, x) => `<input id="${id}" type="text" inputmode="decimal" autocomplete="off" value="${val(x)}" placeholder="0">`;
+    openSheet(`
+      <h3>${wkName(w)}</h3>
+      <div class="cur">Montants de tes relevés Uber, Bolt et Heetch pour la semaine</div>
+      <div class="pair-lbl">Chiffre d'affaires</div>
+      <div class="pair"><div><small>Uber</small>${inp("ca0", w.ca[0])}</div><div><small>Bolt</small>${inp("ca1", w.ca[1])}</div><div><small>Heetch</small>${inp("ca2", w.ca[2])}</div></div>
+      <div class="pair-lbl">Cash encaissé</div>
+      <div class="pair"><div><small>Uber</small>${inp("cs0", w.cash[0])}</div><div><small>Bolt</small>${inp("cs1", w.cash[1])}</div><div><small>Heetch</small>${inp("cs2", w.cash[2])}</div></div>
+      <div class="calc" id="calc"></div>
+      <button class="toggle" id="recu" aria-pressed="${!!w.recu}"><span>Virement reçu</span><span class="sw"></span></button>
+      <button class="btn primary" id="saveVir" style="width:100%">Enregistrer</button>`);
+    const g = id => { const n = parse($(id).value); return isFinite(n) ? n : 0; };
+    const draft = () => ({ ...w, ca: [g("ca0"), g("ca1"), g("ca2")], cash: [g("cs0"), g("cs1"), g("cs2")] });
+    const upd = () => { const c = weekCalc(draft());
+      $("calc").innerHTML = `<span>CA total</span><span>${eur(c.ca)}</span><span>− Cash</span><span>${eur(c.cash)}</span><span>− Frais Baldi</span><span>${eur(c.frais)}</span><span class="big">Virement attendu</span><span class="big">${eur(c.vir)}</span>`; };
+    $("sheet").querySelectorAll(".pair input").forEach(i => (i.oninput = upd)); upd();
+    $("recu").onclick = () => $("recu").setAttribute("aria-pressed", $("recu").getAttribute("aria-pressed") === "true" ? "false" : "true");
+    $("saveVir").onclick = async () => {
+      const bad = ["ca0", "ca1", "ca2", "cs0", "cs1", "cs2"].some(id => $(id).value.trim() !== "" && !isFinite(parse($(id).value)));
+      if (bad) { toast("Un montant n'est pas un nombre", true); return; }
+      const d = draft(); delete d._new; d.ca = d.ca.map(r2); d.cash = d.cash.map(r2); d.recu = $("recu").getAttribute("aria-pressed") === "true";
+      try { await put("weeks", d); S.weeks.set(d.id, d); closeSheet(); renderVir(); toast(`Enregistré · virement ${eur(weekCalc(d).vir)}`); }
+      catch (e) { toast("Enregistrement impossible", true); }
+    };
+  }
+
+  // ---------- Stats ----------
+  function renderStats() {
+    const allDates = [...S.days.keys(), ...S.deps.filter(x => x.cat !== "Démarrage").map(x => x.date)].sort();
+    if (!allDates.length) { $("stats").innerHTML = '<div class="list"><div class="item empty">Pas encore de données. Saisis ta première journée dans l\'onglet Jour.</div></div>'; return; }
+    const first = fromIso(allDates[0]), now = new Date();
+    const months = [];
+    for (let d = new Date(first.getFullYear(), first.getMonth(), 1); d <= now; d = new Date(d.getFullYear(), d.getMonth() + 1, 1)) {
+      const t = periodTotals(iso(d), iso(new Date(d.getFullYear(), d.getMonth() + 1, 0)));
+      months.push({ d, ...t });
+    }
+    const tot = months.reduce((a, m) => ({ ca: a.ca + m.ca, charges: a.charges + m.charges, net: a.net + m.net, jours: a.jours + m.jours }), { ca: 0, charges: 0, net: 0, jours: 0 });
+    const actifs = months.filter(m => m.ca > 0).length || 1;
+    const invest = S.deps.filter(x => x.cat === "Démarrage").reduce((a, x) => a + x.montant, 0);
+
+    let h = `<div class="kpis">
+      <div class="kpi main"><div class="lbl">Revenu net depuis le début</div><div class="v">${eur0(tot.net)}</div></div>
+      <div class="kpi"><div class="lbl">Chiffre d'affaires</div><div class="v">${eur0(tot.ca)}</div></div>
+      <div class="kpi"><div class="lbl">Charges</div><div class="v">${eur0(tot.charges)}</div></div>
+      <div class="kpi"><div class="lbl">Net moyen / mois</div><div class="v">${eur0(tot.net / actifs)}</div></div>
+      <div class="kpi"><div class="lbl">Net après voiture</div><div class="v">${eur0(tot.net - invest)}</div></div>
+    </div>
+    <h2>Par mois</h2>
+    <div class="tbl-wrap"><table><thead><tr><th>Mois</th><th>Brut</th><th>Charges</th><th>Net</th></tr></thead><tbody>`;
+    months.slice().reverse().filter(m => m.ca || m.charges).forEach(m => {
+      h += `<tr><td>${SHORT[m.d.getMonth()]} ${String(m.d.getFullYear()).slice(2)}</td><td>${eur0(m.ca)}</td><td>${eur0(m.charges)}</td><td class="n${m.net < 0 ? " neg" : ""}">${eur0(m.net)}</td></tr>`;
+    });
+    h += `<tr class="tot"><td>Total</td><td>${eur0(tot.ca)}</td><td>${eur0(tot.charges)}</td><td class="n">${eur0(tot.net)}</td></tr></tbody></table></div>`;
+
+    const plat = [["Uber", "uber"], ["Bolt", "bolt"], ["Heetch", "heetch"], ["Privé (cash)", "prive"], ["Pourboires cash", "pourboire"]]
+      .map(([n, k]) => { let s = 0; S.days.forEach(d => (s += v(d, k))); return [n, s]; });
+    const catSum = c => S.deps.filter(x => x.cat === c).reduce((a, x) => a + x.montant, 0);
+    let carb = 0, repas = 0; S.days.forEach(d => { carb += v(d, "carburant"); repas += v(d, "repas"); });
+    const ch = [["Carburant", carb], ["Repas / café", repas], ["Rattachement", catSum("Rattachement")], ["Assurance", catSum("Assurance")],
+      ["Entretien", catSum("Entretien")], ["Amendes", catSum("Amende")], ["Autres", catSum("Péage / parking") + catSum("Équipement") + catSum("Autre")]];
+    const bars = (list, cls) => { const max = Math.max(1, ...list.map(x => x[1]));
+      return list.map(([n, s]) => `<div class="rowline"><div class="top"><span>${n} <small>${tot.ca ? Math.round(s / tot.ca * 100) : 0}%</small></span><b>${eur0(s)}</b></div><div class="bar ${cls}"><i style="width:${(s / max * 100).toFixed(1)}%"></i></div></div>`).join(""); };
+    h += `<h2>Par plateforme</h2><div class="list">${bars(plat, "")}</div>`;
+    h += `<h2>Charges par catégorie</h2><div class="list">${bars(ch, "ch")}</div>`;
+    h += `<p class="note">Investissement de départ (voiture, immatriculation, formation…) : ${eur0(invest)}, compté à part.</p>`;
+    $("stats").innerHTML = h;
+  }
+
+  // ---------- Sauvegarde / restauration ----------
+  function lastBackupText() {
+    const t = S.meta.lastBackup; if (!t) return "Jamais sauvegardé sur ce téléphone.";
+    const d = new Date(t); return `Dernière sauvegarde : ${d.toLocaleDateString("fr-FR")} à ${d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}.`;
+  }
+  function openSettings() {
+    openSheet(`
+      <h3>Sauvegarde</h3>
+      <div class="cur">Tes données sont enregistrées uniquement dans ce téléphone. Fais une sauvegarde chaque semaine et range le fichier dans iCloud Drive ou envoie-le-toi par mail. ${lastBackupText()}</div>
+      <div class="stack">
+        <button class="btn primary" id="doExport">Sauvegarder mes données</button>
+        <button class="btn ghost" id="doImport">Restaurer une sauvegarde</button>
+      </div>
+      <p class="note">${S.days.size} jours, ${S.deps.length} dépenses et ${S.weeks.size} semaines enregistrés.</p>`);
+    $("doExport").onclick = exportData;
+    $("doImport").onclick = () => $("fileIn").click();
+  }
+  async function exportData() {
+    const data = { app: "vtc", version: 1, exportedAt: new Date().toISOString(), days: [...S.days.values()], depenses: S.deps, weeks: [...S.weeks.values()] };
+    const name = `vtc-sauvegarde-${todayIso()}.json`;
+    const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
+    let done = false;
+    try {
+      const file = new File([blob], name, { type: "application/json" });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: "Sauvegarde VTC" }); done = true; }
+    } catch (e) { if (e && e.name === "AbortError") { toast("Sauvegarde annulée", true); return; } }
+    if (!done) {
+      const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click();
+      setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000); done = true;
+    }
+    S.meta.lastBackup = Date.now(); await put("meta", { k: "lastBackup", v: S.meta.lastBackup });
+    closeSheet(); renderBanner(); toast("Sauvegarde créée");
+  }
+  $("fileIn").onchange = async e => {
+    const f = e.target.files && e.target.files[0]; e.target.value = "";
+    if (!f) return;
+    let data;
+    try { data = JSON.parse(await f.text()); } catch (_) { toast("Ce fichier n'est pas une sauvegarde VTC", true); return; }
+    if (!data || data.app !== "vtc" || !Array.isArray(data.days)) { toast("Ce fichier n'est pas une sauvegarde VTC", true); return; }
+    const exist = S.days.size + S.deps.length + S.weeks.size;
+    openSheet(`
+      <h3>Restaurer cette sauvegarde ?</h3>
+      <div class="cur">Le fichier contient ${data.days.length} jours, ${(data.depenses || []).length} dépenses et ${(data.weeks || []).length} semaines.
+      ${exist ? "Les données actuelles de ce téléphone seront remplacées." : ""}</div>
+      <div class="stack"><button class="btn primary" id="okImport">Restaurer</button><button class="btn ghost" id="noImport">Annuler</button></div>`);
+    $("noImport").onclick = closeSheet;
+    $("okImport").onclick = async () => {
+      try { await replaceAll(data); await loadAll(); closeSheet(); renderAll(); toast("Données restaurées"); }
+      catch (err) { toast("Restauration impossible", true); }
+    };
+  };
+
+  function renderBanner() {
+    const b = $("banner");
+    const empty = !S.days.size && !S.deps.length && !S.weeks.size;
+    const old = S.meta.lastBackup ? (Date.now() - S.meta.lastBackup) > 7 * 86400000 : true;
+    if (empty) {
+      b.className = "banner"; b.hidden = false;
+      b.innerHTML = `<b>Bienvenue dans ton appli VTC</b>Tu as un fichier de sauvegarde (par exemple ton historique) ? Charge-le pour retrouver toutes tes données.<div class="row"><button class="btn primary small" id="bImport">Restaurer une sauvegarde</button></div>`;
+      $("bImport").onclick = () => $("fileIn").click();
+    } else if (old) {
+      b.className = "banner warn"; b.hidden = false;
+      b.innerHTML = `<b>Pense à sauvegarder</b>${esc(lastBackupText())} Si tu perds ton téléphone, tes données partent avec.<div class="row"><button class="btn primary small" id="bExport">Sauvegarder maintenant</button></div>`;
+      $("bExport").onclick = exportData;
+    } else b.hidden = true;
+  }
+
+  // ---------- Onglets ----------
+  function renderAll() { renderBanner(); if (tab === "jour") renderJour(); else if (tab === "vir") renderVir(); else renderStats(); }
+  function showTab(t) {
+    tab = t;
+    ["jour", "vir", "stats"].forEach(k => { $("t-" + k).setAttribute("aria-selected", String(k === t)); $("p-" + k).hidden = k !== t; });
+    $("fab").hidden = t !== "jour"; window.scrollTo(0, 0); renderAll();
+  }
+  $("t-jour").onclick = () => showTab("jour");
+  $("t-vir").onclick = () => showTab("vir");
+  $("t-stats").onclick = () => showTab("stats");
+  $("prev").onclick = () => { curDate = iso(addDays(fromIso(curDate), -1)); renderJour(); };
+  $("next").onclick = () => { if (curDate < todayIso()) { curDate = iso(addDays(fromIso(curDate), 1)); renderJour(); } };
+  $("fab").onclick = () => openDepense(null);
+  $("settings").onclick = openSettings;
+
+  // Nouveau jour quand l'appli revient au premier plan
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && idb) { if (curDate > todayIso() || $("dayLabel").textContent.includes("Aujourd'hui")) curDate = todayIso(); renderAll(); }
+  });
+  const net = () => ($("status").textContent = (navigator.onLine ? "En ligne" : "Hors ligne") + " · données sur ce téléphone");
+  addEventListener("online", net); addEventListener("offline", net);
+
+  // ---------- Démarrage ----------
+  (async () => {
+    net();
+    try {
+      idb = await openDb(); await loadAll();
+      if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+      renderAll();
+    } catch (e) {
+      $("banner").hidden = false; $("banner").className = "banner warn";
+      $("banner").innerHTML = "<b>Stockage indisponible</b>Ouvre l'appli depuis l'icône de l'écran d'accueil (pas en navigation privée).";
+    }
+    if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+  })();
+})();
+</script>
+</body>
+</html>
