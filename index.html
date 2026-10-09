@@ -47,6 +47,8 @@
   .icon-btn { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; width: 44px; height: 44px; font-size: 19px;
     display: inline-grid; place-items: center; position: relative; padding: 0; }
   .hbtns { display: flex; gap: 8px; }
+  .icon-btn.spin svg { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
   .icon-btn.due::after { content: ""; position: absolute; top: 6px; right: 6px; width: 9px; height: 9px; border-radius: 50%;
     background: var(--fab); box-shadow: 0 0 0 2px var(--surface); }
 
@@ -58,6 +60,9 @@
   .banner b { display: block; margin-bottom: 2px; }
   .banner.warn { border-color: var(--charge); }
   .banner .row { margin-top: 10px; }
+  .slim { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 13px; color: var(--muted);
+    margin: -4px 0 12px; padding: 0 2px; }
+  .slim button { border: 0; background: none; color: var(--accent); font-weight: 700; font-size: 13.5px; padding: 6px 0; }
 
   .daynav { display: grid; grid-template-columns: 44px 1fr 44px; gap: 8px; align-items: center; margin-bottom: 12px; }
   .daynav .d { text-align: center; font-weight: 700; font-size: 16px; text-transform: capitalize; }
@@ -183,7 +188,10 @@
       <button class="icon-btn" id="quickSave" aria-label="Sauvegarder mes données">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
       </button>
-      <button class="icon-btn" id="settings" aria-label="Sauvegarde et réglages">⚙︎</button>
+      <button class="icon-btn" id="syncBtn" aria-label="Synchroniser Google Sheets" hidden>
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 3v5h5"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 21v-5h-5"/></svg>
+      </button>
+      <button class="icon-btn" id="settings" aria-label="Réglages">⚙︎</button>
     </div>
   </header>
 
@@ -252,8 +260,9 @@
     t.oncomplete = () => res(out && out.result !== undefined ? out.result : undefined); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error);
   });
   const getAll = store => tx(store, "readonly", s => s.getAll());
-  const put = (store, v) => tx(store, "readwrite", s => s.put(v));
-  const del = (store, k) => tx(store, "readwrite", s => s.delete(k));
+  // Chaque modification des données déclenche la sauvegarde en ligne (si activée)
+  const put = (store, v) => tx(store, "readwrite", s => s.put(v)).then(r => { if (store !== "meta") markDirty(); return r; });
+  const del = (store, k) => tx(store, "readwrite", s => s.delete(k)).then(r => { if (store !== "meta") markDirty(); return r; });
   async function replaceAll(data) {
     await new Promise((res, rej) => {
       const t = idb.transaction(["days", "depenses", "weeks"], "readwrite");
@@ -549,25 +558,84 @@
     $("stats").innerHTML = h;
   }
 
+  // ================= SYNCHRONISATION AVEC GOOGLE SHEETS =================
+  // L'appli envoie toutes ses données au petit script Google installé dans le fichier VTC,
+  // qui met à jour les onglets Journal, Dépenses et Virements.
+  const snapshot = () => ({ app: "vtc", version: 1, exportedAt: new Date().toISOString(), days: [...S.days.values()], depenses: S.deps, weeks: [...S.weeks.values()] });
+  const hhmm = t => { const d = new Date(t); const same = iso(d) === todayIso();
+    return (same ? "" : d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }) + " ") + d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }); };
+  const sync = { busy: false, ok: () => /^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(S.meta.sheetUrl || "") };
+  async function setMeta(k, v) { S.meta[k] = v; await tx("meta", "readwrite", s => (v === undefined ? s.delete(k) : s.put({ k, v }))); }
+  function markDirty() {
+    S.meta.unsynced = true; tx("meta", "readwrite", s => s.put({ k: "unsynced", v: true })).catch(() => {});
+    updateStatus(); renderSyncBtn();
+  }
+  function renderSyncBtn() {
+    const b = $("syncBtn"); if (!b) return;
+    b.hidden = !sync.ok();
+    b.classList.toggle("due", !!S.meta.unsynced);
+    b.classList.toggle("spin", sync.busy);
+    b.setAttribute("aria-label", S.meta.unsynced ? "Synchroniser Google Sheets (modifications en attente)" : "Synchroniser Google Sheets");
+  }
+  function updateStatus() {
+    const st = $("status"); if (!st) return;
+    if (!sync.ok()) { st.textContent = (navigator.onLine ? "En ligne" : "Hors ligne") + " · données sur ce téléphone"; return; }
+    if (sync.busy) st.textContent = "Synchronisation…";
+    else if (S.meta.unsynced) st.textContent = (navigator.onLine ? "" : "Hors ligne · ") + "Modifications à synchroniser";
+    else st.textContent = S.meta.lastSync ? "Google Sheets à jour · " + hhmm(S.meta.lastSync) : "Google Sheets relié";
+  }
+  async function syncSheet() {
+    if (!sync.ok()) { openSettings(); return; }
+    if (sync.busy) return;
+    if (!navigator.onLine) { toast("Pas de réseau : synchronise dès que tu as internet", true); return; }
+    sync.busy = true; updateStatus(); renderSyncBtn();
+    try {
+      const r = await fetch(S.meta.sheetUrl, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(snapshot()), cache: "no-store" });
+      let j = null; try { j = await r.json(); } catch (_) {}
+      if (!r.ok || !j) throw new Error("Le script Google n'a pas répondu correctement. Vérifie le lien et l'accès « Tout le monde ».");
+      if (!j.ok) throw new Error(j.error || "Erreur du script Google");
+      await setMeta("unsynced", false); await setMeta("lastSync", Date.now());
+      toast(`Google Sheets à jour · ${j.days} jours, ${j.depenses} dépenses`);
+    } catch (e) {
+      toast(e && e.message && !/fetch|network|load/i.test(e.message) ? e.message : "Synchronisation impossible : vérifie internet et le lien du script", true);
+    } finally { sync.busy = false; updateStatus(); renderSyncBtn(); }
+  }
+
   // ---------- Sauvegarde / restauration ----------
   function lastBackupText() {
-    const t = S.meta.lastBackup; if (!t) return "Jamais sauvegardé sur ce téléphone.";
-    const d = new Date(t); return `Dernière sauvegarde : ${d.toLocaleDateString("fr-FR")} à ${d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}.`;
+    const t = S.meta.lastBackup; if (!t) return "Aucun fichier de sauvegarde créé.";
+    return `Dernier fichier de sauvegarde : ${hhmm(t)}.`;
   }
   function openSettings() {
+    const on = sync.ok();
     openSheet(`
-      <h3>Sauvegarde</h3>
-      <div class="cur">Tes données sont enregistrées uniquement dans ce téléphone. Fais une sauvegarde chaque semaine et range le fichier dans iCloud Drive ou envoie-le-toi par mail. ${lastBackupText()}</div>
+      <h3>Réglages</h3>
+      <div class="pair-lbl">Google Sheets</div>
+      <div class="cur">${on ? `<b style="color:var(--net)">Relié</b> · ${S.meta.lastSync ? "dernière synchro " + hhmm(S.meta.lastSync) : "jamais synchronisé"}` :
+        "Colle ici le lien du script Google (il commence par https://script.google.com/macros/s/…)."}</div>
+      <input id="sheetUrl" class="small" type="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://script.google.com/macros/s/…/exec" value="${esc(S.meta.sheetUrl || "")}" aria-label="Lien du script Google">
       <div class="stack">
-        <button class="btn primary" id="doExport">Sauvegarder mes données</button>
-        <button class="btn ghost" id="doImport">Restaurer une sauvegarde</button>
+        <button class="btn primary" id="saveUrl">${on ? "Enregistrer le lien" : "Relier Google Sheets"}</button>
+        ${on ? `<button class="btn ghost" id="syncNow">Synchroniser maintenant</button>` : ""}
       </div>
-      <p class="note">${S.days.size} jours, ${S.deps.length} dépenses et ${S.weeks.size} semaines enregistrés.</p>`);
+      <div class="pair-lbl" style="margin-top:16px">Fichier de sauvegarde</div>
+      <div class="cur">${lastBackupText()}</div>
+      <div class="stack">
+        <button class="btn ghost" id="doExport">Sauvegarder dans un fichier</button>
+        <button class="btn ghost" id="doImport">Restaurer un fichier</button>
+      </div>
+      <p class="note">${S.days.size} jours, ${S.deps.length} dépenses et ${S.weeks.size} semaines enregistrés sur ce téléphone.</p>`);
     $("doExport").onclick = exportData;
     $("doImport").onclick = () => $("fileIn").click();
+    $("saveUrl").onclick = async () => {
+      const u = $("sheetUrl").value.trim();
+      if (!/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(u)) { toast("Lien invalide : il doit finir par /exec", true); return; }
+      await setMeta("sheetUrl", u); await setMeta("unsynced", true); closeSheet(); renderBanner(); syncSheet();
+    };
+    if (on) $("syncNow").onclick = () => { closeSheet(); syncSheet(); };
   }
   async function exportData() {
-    const data = { app: "vtc", version: 1, exportedAt: new Date().toISOString(), days: [...S.days.values()], depenses: S.deps, weeks: [...S.weeks.values()] };
+    const data = snapshot();
     const name = `vtc-sauvegarde-${todayIso()}.json`;
     const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
     let done = false;
@@ -587,19 +655,23 @@
     if (!f) return;
     let data;
     try { data = JSON.parse(await f.text()); } catch (_) { toast("Ce fichier n'est pas une sauvegarde VTC", true); return; }
-    if (!data || data.app !== "vtc" || !Array.isArray(data.days)) { toast("Ce fichier n'est pas une sauvegarde VTC", true); return; }
+    confirmRestore(data, "fichier", () => markDirty());
+  };
+  function confirmRestore(data, source, after) {
+    if (!data || data.app !== "vtc" || !Array.isArray(data.days)) { toast("Ce n'est pas une sauvegarde VTC", true); return; }
     const exist = S.days.size + S.deps.length + S.weeks.size;
+    const when = data.exportedAt ? ` du ${hhmm(Date.parse(data.exportedAt))}` : "";
     openSheet(`
-      <h3>Restaurer cette sauvegarde ?</h3>
-      <div class="cur">Le fichier contient ${data.days.length} jours, ${(data.depenses || []).length} dépenses et ${(data.weeks || []).length} semaines.
+      <h3>Restaurer la sauvegarde du fichier${when} ?</h3>
+      <div class="cur">Elle contient ${data.days.length} jours, ${(data.depenses || []).length} dépenses et ${(data.weeks || []).length} semaines.
       ${exist ? "Les données actuelles de ce téléphone seront remplacées." : ""}</div>
       <div class="stack"><button class="btn primary" id="okImport">Restaurer</button><button class="btn ghost" id="noImport">Annuler</button></div>`);
     $("noImport").onclick = closeSheet;
     $("okImport").onclick = async () => {
-      try { await replaceAll(data); await loadAll(); closeSheet(); renderAll(); toast("Données restaurées"); }
+      try { await replaceAll(data); await loadAll(); if (after) await after(); closeSheet(); renderAll(); toast("Données restaurées"); }
       catch (err) { toast("Restauration impossible", true); }
     };
-  };
+  }
 
   function renderBanner() {
     const b = $("banner");
@@ -612,9 +684,10 @@
     } else b.hidden = true;
     $("quickSave").classList.toggle("due", !empty && old);
     $("quickSave").setAttribute("aria-label", !empty && old ? "Sauvegarder mes données (à faire)" : "Sauvegarder mes données");
+    updateStatus(); renderSyncBtn();
   }
 
-  // ---------- Onglets ----------
+    // ---------- Onglets ----------
   function renderAll() { renderBanner(); if (tab === "jour") renderJour(); else if (tab === "vir") renderVir(); else renderStats(); }
   function showTab(t) {
     tab = t;
@@ -629,17 +702,17 @@
   $("fab").onclick = () => openDepense(null);
   $("settings").onclick = openSettings;
   $("quickSave").onclick = exportData;
+  $("syncBtn").onclick = syncSheet;
 
   // Nouveau jour quand l'appli revient au premier plan
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible" && idb) { if (curDate > todayIso() || $("dayLabel").textContent.includes("Aujourd'hui")) curDate = todayIso(); renderAll(); }
   });
-  const net = () => ($("status").textContent = (navigator.onLine ? "En ligne" : "Hors ligne") + " · données sur ce téléphone");
-  addEventListener("online", net); addEventListener("offline", net);
+  addEventListener("online", updateStatus); addEventListener("offline", updateStatus);
 
   // ---------- Démarrage ----------
   (async () => {
-    net();
+    updateStatus();
     try {
       idb = await openDb(); await loadAll();
       if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
@@ -648,7 +721,15 @@
       $("banner").hidden = false; $("banner").className = "banner warn";
       $("banner").innerHTML = "<b>Stockage indisponible</b>Ouvre l'appli depuis l'icône de l'écran d'accueil (pas en navigation privée).";
     }
-    if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+    if ("serviceWorker" in navigator) {
+      // Nouvelle version installée : on recharge une fois pour l'afficher tout de suite
+      const hadController = !!navigator.serviceWorker.controller;
+      let reloaded = false;
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        if (hadController && !reloaded && !$("sheet").classList.contains("open")) { reloaded = true; location.reload(); }
+      });
+      navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).then(r => r.update()).catch(() => {});
+    }
   })();
 })();
 </script>
