@@ -567,8 +567,14 @@
   const sync = { busy: false, ok: () => /^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(S.meta.sheetUrl || "") };
   async function setMeta(k, v) { S.meta[k] = v; await tx("meta", "readwrite", s => (v === undefined ? s.delete(k) : s.put({ k, v }))); }
   function markDirty() {
-    S.meta.unsynced = true; tx("meta", "readwrite", s => s.put({ k: "unsynced", v: true })).catch(() => {});
-    updateStatus(); renderSyncBtn();
+    S.meta.unsynced = true; sync.seq = (sync.seq || 0) + 1;
+    tx("meta", "readwrite", s => s.put({ k: "unsynced", v: true })).catch(() => {});
+    updateStatus(); renderSyncBtn(); scheduleSync(5000);
+  }
+  // Synchro automatique : quelques secondes après chaque saisie, au retour du réseau et à l'ouverture
+  function scheduleSync(ms) {
+    if (!sync.ok() || !navigator.onLine) return;
+    clearTimeout(sync.timer); sync.timer = setTimeout(() => syncSheet(true), ms);
   }
   function renderSyncBtn() {
     const b = $("syncBtn"); if (!b) return;
@@ -581,24 +587,43 @@
     const st = $("status"); if (!st) return;
     if (!sync.ok()) { st.textContent = (navigator.onLine ? "En ligne" : "Hors ligne") + " · données sur ce téléphone"; return; }
     if (sync.busy) st.textContent = "Synchronisation…";
-    else if (S.meta.unsynced) st.textContent = (navigator.onLine ? "" : "Hors ligne · ") + "Modifications à synchroniser";
+    else if (S.meta.unsynced) st.textContent = !navigator.onLine ? "Hors ligne · envoi au retour du réseau" : sync.err ? "Synchro échouée · touche ⟳" : "Envoi au Google Sheets…";
     else st.textContent = S.meta.lastSync ? "Google Sheets à jour · " + hhmm(S.meta.lastSync) : "Google Sheets relié";
   }
-  async function syncSheet() {
-    if (!sync.ok()) { openSettings(); return; }
-    if (sync.busy) return;
-    if (!navigator.onLine) { toast("Pas de réseau : synchronise dès que tu as internet", true); return; }
-    sync.busy = true; updateStatus(); renderSyncBtn();
+  async function syncSheet(silent) {
+    if (silent !== true) silent = false;
+    if (!sync.ok()) { if (!silent) openSettings(); return; }
+    if (sync.busy) { sync.again = true; return; }
+    if (!navigator.onLine) { if (!silent) toast("Pas de réseau : l'envoi partira dès que tu as internet", true); updateStatus(); return; }
+    clearTimeout(sync.timer);
+    sync.busy = true; sync.again = false; updateStatus(); renderSyncBtn();
+    const seqAtStart = sync.seq || 0;
     try {
       const r = await fetch(S.meta.sheetUrl, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(snapshot()), cache: "no-store" });
       let j = null; try { j = await r.json(); } catch (_) {}
       if (!r.ok || !j) throw new Error("Le script Google n'a pas répondu correctement. Vérifie le lien et l'accès « Tout le monde ».");
       if (!j.ok) throw new Error(j.error || "Erreur du script Google");
-      await setMeta("unsynced", false); await setMeta("lastSync", Date.now());
-      toast(`Google Sheets à jour · ${j.days} jours, ${j.depenses} dépenses`);
+      sync.err = null;
+      if ((sync.seq || 0) === seqAtStart) await setMeta("unsynced", false); // rien n'a changé pendant l'envoi
+      else sync.again = true;
+      await setMeta("lastSync", Date.now());
+      if (!silent) toast(`Google Sheets à jour · ${j.days} jours, ${j.depenses} dépenses`);
     } catch (e) {
-      toast(e && e.message && !/fetch|network|load/i.test(e.message) ? e.message : "Synchronisation impossible : vérifie internet et le lien du script", true);
-    } finally { sync.busy = false; updateStatus(); renderSyncBtn(); }
+      sync.err = true;
+      const msg = e && e.message && !/fetch|network|load/i.test(e.message) ? e.message : "Synchronisation impossible : vérifie internet et le lien du script";
+      if (!silent) toast(msg, true);
+    } finally {
+      sync.busy = false; updateStatus(); renderSyncBtn();
+      if (sync.again && !sync.err) scheduleSync(1500);
+    }
+  }
+  // En quittant l'appli : dernier envoi si des saisies ne sont pas encore parties
+  function flushSync() {
+    if (!sync.ok() || !S.meta.unsynced || !navigator.onLine || sync.busy) return;
+    clearTimeout(sync.timer);
+    try {
+      fetch(S.meta.sheetUrl, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(snapshot()), keepalive: true }).catch(() => {});
+    } catch (_) {}
   }
 
   // ---------- Sauvegarde / restauration ----------
@@ -702,13 +727,18 @@
   $("fab").onclick = () => openDepense(null);
   $("settings").onclick = openSettings;
   $("quickSave").onclick = exportData;
-  $("syncBtn").onclick = syncSheet;
+  $("syncBtn").onclick = () => syncSheet(false);
 
   // Nouveau jour quand l'appli revient au premier plan
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible" && idb) { if (curDate > todayIso() || $("dayLabel").textContent.includes("Aujourd'hui")) curDate = todayIso(); renderAll(); }
+    if (!idb) return;
+    if (document.visibilityState === "visible") {
+      if (curDate > todayIso() || $("dayLabel").textContent.includes("Aujourd'hui")) curDate = todayIso();
+      renderAll(); if (S.meta.unsynced) scheduleSync(2000);
+    } else flushSync();
   });
-  addEventListener("online", updateStatus); addEventListener("offline", updateStatus);
+  addEventListener("online", () => { updateStatus(); if (S.meta.unsynced) scheduleSync(2000); });
+  addEventListener("offline", updateStatus);
 
   // ---------- Démarrage ----------
   (async () => {
@@ -717,6 +747,7 @@
       idb = await openDb(); await loadAll();
       if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
       renderAll();
+      if (S.meta.unsynced) scheduleSync(3000);
     } catch (e) {
       $("banner").hidden = false; $("banner").className = "banner warn";
       $("banner").innerHTML = "<b>Stockage indisponible</b>Ouvre l'appli depuis l'icône de l'écran d'accueil (pas en navigation privée).";
