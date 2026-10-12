@@ -47,6 +47,16 @@
   .icon-btn { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; width: 44px; height: 44px; font-size: 19px;
     display: inline-grid; place-items: center; position: relative; padding: 0; }
   .hbtns { display: flex; gap: 8px; }
+  .tgrid { display: grid; grid-template-columns: 1fr; gap: 2px; }
+  .trow { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
+  .trow input { margin: 0 !important; min-width: 0; flex: 1; font-size: 19px !important; padding: 11px 8px !important; }
+  .trow .now { flex: none; width: 50px; height: 50px; display: grid; place-items: center; padding: 0; border: 1px solid var(--line); background: var(--surface-2); color: var(--accent); border-radius: 12px; }
+  .trow .now:active { transform: scale(.94); }
+  .hmrow { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .hmrow input { margin: 0 !important; flex: 1; min-width: 0; text-align: center; font-size: 22px !important; font-weight: 700; }
+  .hmrow span { font-weight: 700; color: var(--muted, #888); }
+  .tile.running { border-color: var(--accent); }
+  .tile.running .v { color: var(--accent); font-size: 15px; }
   .icon-btn.spin svg { animation: spin 1s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .icon-btn.due::after { content: ""; position: absolute; top: 6px; right: 6px; width: 9px; height: 9px; border-radius: 50%;
@@ -374,8 +384,10 @@
     const day = S.days.get(curDate) || {};
     const tile = f => {
       const val = v(day, f.k);
-      const txt = f.unit ? (val ? val.toLocaleString("fr-FR") + " " + f.unit : "–") : (val ? eur(val) : "–");
-      return `<button class="tile${f.charge ? " charge" : ""}${val ? "" : " empty"}" data-k="${f.k}"><div class="t">${f.t}</div><div class="v">${txt}</div></button>`;
+      let txt = f.k === "heures" ? (val ? fmtH(val) : "–") : f.unit ? (val ? val.toLocaleString("fr-FR") + " " + f.unit : "–") : (val ? eur(val) : "–");
+      const running = f.k === "heures" && S.meta.shiftStart && S.meta.shiftStart.date === curDate;
+      if (running) txt = (val ? fmtH(val) + " + " : "") + "⏱ " + S.meta.shiftStart.time;
+      return `<button class="tile${f.charge ? " charge" : ""}${val || running ? "" : " empty"}${running ? " running" : ""}" data-k="${f.k}"><div class="t">${running ? "En cours depuis" : f.t}</div><div class="v">${txt}</div></button>`;
     };
     const rec = recettes(day);
     $("tiles").innerHTML =
@@ -397,7 +409,47 @@
     });
   }
 
+  // ---------- Heures : début / fin avec bouton « maintenant » ----------
+  const fmtH = h => { const m = Math.round(h * 60); return `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")}`; };
+  const nowHM = () => { const d = new Date(); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+  const toMin = s => { const m = /^(\d{1,2}):(\d{2})/.exec(s || ""); return m ? (+m[1]) * 60 + (+m[2]) : null; };
+  function openHours() {
+    const f = FIELDS.find(x => x.k === "heures"), cur = v(S.days.get(curDate), "heures");
+    const saved = S.meta.shiftStart && S.meta.shiftStart.date === curDate ? S.meta.shiftStart.time : "";
+    openSheet(`
+      <h3>Heures de travail</h3>
+      <div class="cur">${esc(cap(fromIso(curDate).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })))} · déjà saisi : ${cur ? fmtH(cur) : "rien"}</div>
+      <div class="tgrid">
+        <div><div class="pair-lbl">Début</div><div class="trow"><input id="hStart" type="time" value="${saved}" aria-label="Heure de début"><button class="now" id="nowStart" aria-label="Maintenant" title="Maintenant"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9.5 2.5h5M12 2.5V5"/></svg></button></div></div>
+        <div><div class="pair-lbl">Fin</div><div class="trow"><input id="hEnd" type="time" aria-label="Heure de fin"><button class="now" id="nowEnd" aria-label="Maintenant" title="Maintenant"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9.5 2.5h5M12 2.5V5"/></svg></button></div></div>
+      </div>
+      <div class="calc" id="hCalc"><span>Durée</span><span>—</span></div>
+      <div class="pair-lbl">Ou durée</div>
+      <div class="hmrow"><input id="hH" type="text" inputmode="numeric" autocomplete="off" placeholder="0" aria-label="Heures"><span>h</span><input id="hM" type="text" inputmode="numeric" autocomplete="off" placeholder="00" aria-label="Minutes"><span>min</span></div>
+      <div class="row"><button class="btn primary" id="add">＋ Ajouter</button><button class="btn ghost" id="set">Remplacer</button></div>`);
+    const calc = () => {
+      const a = toMin($("hStart").value), b = toMin($("hEnd").value);
+      if (a == null || b == null) { $("hCalc").innerHTML = `<span>Durée</span><span>${a != null ? "en attente de la fin" : "—"}</span>`; return; }
+      let m = b - a; if (m <= 0) m += 1440; // passage de minuit
+      const h = r2(m / 60);
+      $("hCalc").innerHTML = `<span class="big">Durée</span><span class="big">${fmtH(h)}</span>`;
+      $("hH").value = Math.floor(m / 60); $("hM").value = pad(m % 60);
+    };
+    const keepStart = async () => {
+      const t = $("hStart").value;
+      await setMeta("shiftStart", t ? { date: curDate, time: t } : undefined); renderJour();
+    };
+    $("nowStart").onclick = async () => { $("hStart").value = nowHM(); await keepStart(); calc(); toast(`Début ${$("hStart").value} enregistré`); };
+    $("nowEnd").onclick = () => { $("hEnd").value = nowHM(); calc(); };
+    $("hStart").onchange = async () => { await keepStart(); calc(); };
+    $("hEnd").onchange = calc;
+    $("add").onclick = () => saveField(f, "add");
+    $("set").onclick = () => saveField(f, "set");
+    calc();
+  }
+
   function openField(k) {
+    if (k === "heures") return openHours();
     const f = FIELDS.find(x => x.k === k), cur = v(S.days.get(curDate), k);
     const curTxt = f.unit ? (cur ? cur + " " + f.unit : "rien") : (cur ? eur(cur) : "rien");
     openSheet(`
@@ -411,8 +463,14 @@
     $("set").onclick = () => saveField(f, "set");
   }
   async function saveField(f, mode) {
-    const raw = $("amt").value.trim(), n = parse(raw);
+    let raw, n;
+    if ($("hH")) { // heures saisies en h + min
+      const hh = $("hH").value.trim(), mm = $("hM").value.trim();
+      raw = hh + mm; n = r2(((hh === "" ? 0 : +hh) * 60 + (mm === "" ? 0 : +mm)) / 60);
+      if (raw !== "" && (!/^\d*$/.test(hh) || !/^\d*$/.test(mm) || +mm > 59)) { toast("Minutes entre 0 et 59", true); return; }
+    } else { raw = $("amt").value.trim(); n = parse(raw); }
     if (raw === "" || !isFinite(n)) { toast("Tape un nombre", true); return; }
+    if (f.k === "heures" && S.meta.shiftStart && S.meta.shiftStart.date === curDate) await setMeta("shiftStart", undefined);
     const day = Object.assign({ date: curDate }, S.days.get(curDate) || {});
     const next = r2(mode === "set" ? n : v(day, f.k) + n);
     if (next === 0) delete day[f.k]; else day[f.k] = next;
@@ -420,7 +478,8 @@
       if (Object.keys(day).length === 1) { await del("days", curDate); S.days.delete(curDate); }
       else { await put("days", day); S.days.set(curDate, day); }
       closeSheet(); renderJour();
-      toast(mode === "set" ? `${f.t} : ${f.unit ? next + " " + f.unit : eur(next)}` : `${f.t} +${f.unit ? n : eur(n)}`);
+      const u = x => f.k === "heures" ? fmtH(x) : f.unit ? x + " " + f.unit : eur(x);
+      toast(mode === "set" ? `${f.t} : ${u(next)}` : `${f.t} +${u(n)}`);
     } catch (e) { toast("Enregistrement impossible : " + (e && e.message || e), true); }
   }
 
