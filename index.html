@@ -55,6 +55,8 @@
   .hmrow { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
   .hmrow input { margin: 0 !important; flex: 1; min-width: 0; text-align: center; font-size: 22px !important; font-weight: 700; }
   .hmrow span { font-weight: 700; color: var(--muted, #888); }
+  .pair-lbl .hint { text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--faint); }
+  .calc .neg { color: #d33; font-weight: 600; }
   .tile.running { border-color: var(--accent); }
   .tile.running .v { color: var(--accent); font-size: 15px; }
   .icon-btn.spin svg { animation: spin 1s linear infinite; }
@@ -385,9 +387,11 @@
     const tile = f => {
       const val = v(day, f.k);
       let txt = f.k === "heures" ? (val ? fmtH(val) : "–") : f.unit ? (val ? val.toLocaleString("fr-FR") + " " + f.unit : "–") : (val ? eur(val) : "–");
-      const running = f.k === "heures" && S.meta.shiftStart && S.meta.shiftStart.date === curDate;
-      if (running) txt = (val ? fmtH(val) + " + " : "") + "⏱ " + S.meta.shiftStart.time;
-      return `<button class="tile${f.charge ? " charge" : ""}${val || running ? "" : " empty"}${running ? " running" : ""}" data-k="${f.k}"><div class="t">${running ? "En cours depuis" : f.t}</div><div class="v">${txt}</div></button>`;
+      const kmRun = f.k === "km" && typeof day.kmStart === "number" && typeof day.kmEnd !== "number";
+      const running = kmRun || (f.k === "heures" && S.meta.shiftStart && S.meta.shiftStart.date === curDate);
+      if (running && f.k === "heures") txt = (val ? fmtH(val) + " + " : "") + "⏱ " + S.meta.shiftStart.time;
+      if (kmRun) txt = (val ? val.toLocaleString("fr-FR") + " km · " : "") + day.kmStart.toLocaleString("fr-FR");
+      return `<button class="tile${f.charge ? " charge" : ""}${val || running ? "" : " empty"}${running ? " running" : ""}" data-k="${f.k}"><div class="t">${kmRun ? "Km · compteur début" : running ? "En cours depuis" : f.t}</div><div class="v">${txt}</div></button>`;
     };
     const rec = recettes(day);
     $("tiles").innerHTML =
@@ -448,8 +452,67 @@
     calc();
   }
 
+  // ---------- Km : compteur début / fin ----------
+  // Le compteur de début reprend le compteur de fin du dernier jour saisi.
+  function lastKmEnd(before) {
+    let best = null;
+    S.days.forEach((d, date) => { if (date < before && typeof d.kmEnd === "number" && (!best || date > best.date)) best = { date, km: d.kmEnd }; });
+    return best;
+  }
+  function openKm() {
+    const f = FIELDS.find(x => x.k === "km"), day = S.days.get(curDate) || {}, cur = v(day, "km");
+    const prev = lastKmEnd(curDate);
+    const startVal = typeof day.kmStart === "number" ? day.kmStart : prev ? prev.km : "";
+    const pd = prev && typeof day.kmStart !== "number" ? fromIso(prev.date) : null;
+    openSheet(`
+      <h3>Kilomètres</h3>
+      <div class="cur">${esc(cap(fromIso(curDate).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })))} · déjà saisi : ${cur ? cur.toLocaleString("fr-FR") + " km" : "rien"}</div>
+      <div class="pair-lbl">Compteur début${pd ? ` <span class="hint">· fin du ${pad(pd.getDate())}/${pad(pd.getMonth() + 1)}</span>` : ""}</div>
+      <input id="kStart" type="text" inputmode="numeric" autocomplete="off" placeholder="ex. 152 340" value="${startVal}">
+      <div class="pair-lbl">Compteur fin</div>
+      <input id="kEnd" type="text" inputmode="numeric" autocomplete="off" placeholder="à la fin de la journée" value="${typeof day.kmEnd === "number" ? day.kmEnd : ""}">
+      <div class="calc" id="kCalc"><span>Distance</span><span>—</span></div>
+      <div class="pair-lbl">Ou nombre de km</div>
+      <input id="amt" type="text" inputmode="decimal" autocomplete="off" placeholder="ex. 180">
+      <div class="row"><button class="btn primary" id="add">＋ Ajouter</button><button class="btn ghost" id="set">Remplacer</button></div>`);
+    const num = id => { const t = $(id).value.trim(); if (t === "") return null; const n = parse(t); return isFinite(n) ? n : NaN; };
+    const calc = () => {
+      const a = num("kStart"), b = num("kEnd");
+      if (a == null || b == null || isNaN(a) || isNaN(b)) { $("kCalc").innerHTML = `<span>Distance</span><span>${a != null && b == null ? "en attente du compteur fin" : "—"}</span>`; return; }
+      if (b < a) { $("kCalc").innerHTML = `<span>Distance</span><span class="neg">fin plus petite que début</span>`; return; }
+      $("kCalc").innerHTML = `<span class="big">Distance</span><span class="big">${(b - a).toLocaleString("fr-FR")} km</span>`;
+      $("amt").value = String(r2(b - a)).replace(".", ",");
+    };
+    $("kStart").oninput = calc; $("kEnd").oninput = calc;
+    const save = async mode => {
+      const a = num("kStart"), b = num("kEnd");
+      if ((a != null && isNaN(a)) || (b != null && isNaN(b))) { toast("Compteur : tape un nombre", true); return; }
+      if (a != null && b != null && b < a) { toast("Le compteur fin doit être plus grand que le début", true); return; }
+      const d = Object.assign({ date: curDate }, S.days.get(curDate) || {});
+      if (a != null) d.kmStart = a; else delete d.kmStart;
+      if (b != null) d.kmEnd = b; else delete d.kmEnd;
+      const raw = $("amt").value.trim(); let msg;
+      if (raw !== "") {
+        const n = parse(raw); if (!isFinite(n)) { toast("Tape un nombre", true); return; }
+        const next = r2(mode === "set" ? n : v(d, "km") + n);
+        if (next === 0) delete d.km; else d.km = next;
+        msg = mode === "set" ? `Km : ${next.toLocaleString("fr-FR")} km` : `Km +${n.toLocaleString("fr-FR")}`;
+      } else if (a != null) msg = `Compteur début ${a.toLocaleString("fr-FR")} enregistré`;
+      else { toast("Tape le compteur ou un nombre de km", true); return; }
+      try {
+        if (Object.keys(d).length === 1) { await del("days", curDate); S.days.delete(curDate); }
+        else { await put("days", d); S.days.set(curDate, d); }
+        closeSheet(); renderJour(); toast(msg);
+      } catch (e) { toast("Enregistrement impossible : " + (e && e.message || e), true); }
+    };
+    $("add").onclick = () => save("add");
+    $("set").onclick = () => save("set");
+    calc();
+  }
+
   function openField(k) {
     if (k === "heures") return openHours();
+    if (k === "km") return openKm();
     const f = FIELDS.find(x => x.k === k), cur = v(S.days.get(curDate), k);
     const curTxt = f.unit ? (cur ? cur + " " + f.unit : "rien") : (cur ? eur(cur) : "rien");
     openSheet(`
