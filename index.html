@@ -475,6 +475,20 @@
     return [...map.values()].sort((a, b) => (b.y * 1000 + b.m * 10 + b.s) - (a.y * 1000 + a.m * 10 + a.s)).filter(w => (w.y * 1000 + w.m * 10 + w.s) <= (now.y * 1000 + now.m * 10 + now.s));
   }
   const wkName = w => `${cap(MOIS[w.m - 1])} ${w.y} · S${w.s}`;
+  // Frais de rattachement Baldi : ajoutés automatiquement aux dépenses quand la semaine a un CA
+  async function ensureRattachement(w) {
+    const c = weekCalc(w);
+    if (c.ca <= 0 || !(c.frais > 0)) return null;
+    const label = `Baldi S${w.s} ${MOIS[w.m - 1]} ${w.y}`;
+    const id = "rat-" + w.id;
+    const dep = S.deps.find(x => x.id === id) ||
+      S.deps.find(x => x.cat === "Rattachement" && (x.desc || "").trim().toLowerCase() === label.toLowerCase());
+    if (dep && dep.montant === c.frais) return null; // déjà présente
+    const rec = dep ? { ...dep, montant: c.frais } : { id, date: todayIso(), cat: "Rattachement", desc: label, montant: c.frais };
+    await put("depenses", rec);
+    S.deps = S.deps.filter(x => x.id !== rec.id).concat(rec).sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+    return dep ? null : rec;
+  }
   function renderVir() {
     const box = $("wks"); box.innerHTML = "";
     const curId = weekId(weekKeyOf(new Date()));
@@ -511,7 +525,12 @@
       const bad = ["ca0", "ca1", "ca2", "cs0", "cs1", "cs2"].some(id => $(id).value.trim() !== "" && !isFinite(parse($(id).value)));
       if (bad) { toast("Un montant n'est pas un nombre", true); return; }
       const d = draft(); delete d._new; d.ca = d.ca.map(r2); d.cash = d.cash.map(r2); d.recu = $("recu").getAttribute("aria-pressed") === "true";
-      try { await put("weeks", d); S.weeks.set(d.id, d); closeSheet(); renderVir(); toast(`Enregistré · virement ${eur(weekCalc(d).vir)}`); }
+      try {
+        await put("weeks", d); S.weeks.set(d.id, d);
+        const added = await ensureRattachement(d);
+        closeSheet(); renderVir();
+        toast(`Enregistré · virement ${eur(weekCalc(d).vir)}` + (added ? ` · ${eur(added.montant)} Baldi ajouté aux dépenses` : ""));
+      }
       catch (e) { toast("Enregistrement impossible", true); }
     };
   }
