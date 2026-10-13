@@ -100,6 +100,7 @@
   .tile.empty .v { color: var(--faint); font-weight: 500; }
   .tile.total { background: var(--surface-2); cursor: default; }
   .tile.total .v { color: var(--net); }
+  .tile.wide { grid-column: 1 / -1; min-height: 0; padding: 10px 6px; }
   .section-label { font-size: 11.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .07em; font-weight: 600; margin: 12px 0 6px; }
 
   .list { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
@@ -335,11 +336,20 @@
   const dayCharges = d => v(d, "carburant") + v(d, "repas");
 
   function periodTotals(from, to) { // from/to iso inclus
-    let ca = 0, ch = 0, jours = 0;
-    S.days.forEach(d => { if (d.date >= from && d.date <= to) { const r = recettes(d); ca += r; ch += dayCharges(d); if (r > 0) jours++; } });
+    let ca = 0, ch = 0, jours = 0, km = 0, kmCa = 0, carb = 0;
+    const kmFrom = firstKmDate();
+    S.days.forEach(d => { if (d.date >= from && d.date <= to) {
+      const r = recettes(d); ca += r; ch += dayCharges(d); if (r > 0) jours++;
+      if (v(d, "km") > 0) { km += v(d, "km"); kmCa += r; }
+      if (kmFrom && d.date >= kmFrom) carb += v(d, "carburant");
+    } });
     S.deps.forEach(x => { if (x.cat !== "Démarrage" && x.date >= from && x.date <= to) ch += x.montant; });
-    return { ca: r2(ca), charges: r2(ch), net: r2(ca - ch), jours };
+    // € / km : seulement les jours où les km sont saisis. Carburant / km : depuis le premier jour avec des km.
+    return { ca: r2(ca), charges: r2(ch), net: r2(ca - ch), jours, km: r2(km),
+      eurKm: km ? kmCa / km : null, carbKm: km ? carb / km : null };
   }
+  function firstKmDate() { let f = null; S.days.forEach(d => { if (v(d, "km") > 0 && (!f || d.date < f)) f = d.date; }); return f; }
+  const perKm = x => x == null ? "–" : x.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
   function weekCalc(w) {
     const ca = w.ca.reduce((a, b) => a + (b || 0), 0), cash = w.cash.reduce((a, b) => a + (b || 0), 0);
     const frais = ca > 0 ? (typeof w.frais === "number" ? w.frais : 50) : 0;
@@ -365,7 +375,9 @@
   function renderSummary(id, o) {
     const n = $(id + "Net"); n.textContent = eur0(o.net); n.className = "net" + (o.net < 0 ? " neg" : "");
     const det = $(id + "Det"); det.innerHTML = "";
-    [["CA", eur0(o.ca)], ["Charges", eur0(o.charges)], ["Jours", String(o.jours)]].forEach(([a, b]) => {
+    const rows = [["CA", eur0(o.ca)], ["Charges", eur0(o.charges)], ["Jours", String(o.jours)]];
+    if (o.km) rows.push(["Km", Math.round(o.km).toLocaleString("fr-FR")], ["€ / km", perKm(o.eurKm)], ["Carbu / km", perKm(o.carbKm)]);
+    rows.forEach(([a, b]) => {
       const s1 = document.createElement("span"); s1.textContent = a; const s2 = document.createElement("span"); s2.textContent = b; det.append(s1, s2);
     });
   }
@@ -398,7 +410,8 @@
       `<div class="grid">${FIELDS.filter(f => f.g === "rec").map(tile).join("")}` +
       `<div class="tile total"><div class="t">Total</div><div class="v">${rec ? eur(rec) : "–"}</div></div></div>` +
       `<div class="section-label">Dépenses du jour et activité</div>` +
-      `<div class="grid two">${FIELDS.filter(f => f.g === "ch").map(tile).join("")}</div>`;
+      `<div class="grid two">${FIELDS.filter(f => f.g === "ch").map(tile).join("")}` +
+      `<div class="tile total wide"><div class="t">€ / km</div><div class="v">${v(day, "km") > 0 && rec ? perKm(rec / v(day, "km")) : "–"}</div></div></div>`;
     $("tiles").querySelectorAll("button.tile").forEach(b => (b.onclick = () => openField(b.dataset.k)));
 
     const box = $("deps"); box.innerHTML = "";
@@ -685,6 +698,13 @@
     });
     h += `<tr class="tot"><td>Total</td><td>${eur0(tot.ca)}</td><td>${eur0(tot.charges)}</td><td class="n">${eur0(tot.net)}</td></tr></tbody></table></div>`;
 
+    const kmMonths = months.filter(m => m.km > 0);
+    if (kmMonths.length) {
+      const kAll = periodTotals("0000-01-01", "9999-12-31");
+      h += `<h2>Kilomètres</h2><div class="tbl-wrap"><table><thead><tr><th>Mois</th><th>Km</th><th>€ / km</th><th>Carbu / km</th></tr></thead><tbody>`;
+      kmMonths.slice().reverse().forEach(m => { h += `<tr><td>${SHORT[m.d.getMonth()]} ${String(m.d.getFullYear()).slice(2)}</td><td>${Math.round(m.km).toLocaleString("fr-FR")}</td><td class="n">${perKm(m.eurKm)}</td><td>${perKm(m.carbKm)}</td></tr>`; });
+      h += `<tr class="tot"><td>Total</td><td>${Math.round(kAll.km).toLocaleString("fr-FR")}</td><td class="n">${perKm(kAll.eurKm)}</td><td>${perKm(kAll.carbKm)}</td></tr></tbody></table></div>`;
+    }
     const plat = [["Uber", "uber"], ["Bolt", "bolt"], ["Heetch", "heetch"], ["Privé (cash)", "prive"], ["Pourboires cash", "pourboire"]]
       .map(([n, k]) => { let s = 0; S.days.forEach(d => (s += v(d, k))); return [n, s]; });
     const catSum = c => S.deps.filter(x => x.cat === c).reduce((a, x) => a + x.montant, 0);
