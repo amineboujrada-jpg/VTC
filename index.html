@@ -336,14 +336,15 @@
   const dayCharges = d => v(d, "carburant") + v(d, "repas");
 
   function periodTotals(from, to) { // from/to iso inclus
-    let ca = 0, ch = 0, jours = 0, km = 0, kmCa = 0;
+    let ca = 0, ch = 0, jours = 0, km = 0, kmCa = 0, h = 0, hNet = 0;
     S.days.forEach(d => { if (d.date >= from && d.date <= to) {
       const r = recettes(d); ca += r; ch += dayCharges(d); if (r > 0) jours++;
       if (v(d, "km") > 0) { km += v(d, "km"); kmCa += r; }
+      if (v(d, "heures") > 0) { h += v(d, "heures"); hNet += r - dayCharges(d); } // comme la colonne € / heure du Sheets
     } });
     S.deps.forEach(x => { if (x.cat !== "Démarrage" && x.date >= from && x.date <= to) ch += x.montant; });
     // € / km : seulement les jours où les km sont saisis
-    return { ca: r2(ca), charges: r2(ch), net: r2(ca - ch), jours, km: r2(km), eurKm: km ? kmCa / km : null };
+    return { ca: r2(ca), charges: r2(ch), net: r2(ca - ch), jours, km: r2(km), eurKm: km ? kmCa / km : null, eurH: h ? hNet / h : null };
   }
   const perKm = x => x == null ? "–" : x.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
   function weekCalc(w) {
@@ -373,6 +374,7 @@
     const det = $(id + "Det"); det.innerHTML = "";
     const rows = [["CA", eur0(o.ca)], ["Charges", eur0(o.charges)]];
     if (o.km) rows.push(["Km", Math.round(o.km).toLocaleString("fr-FR")], ["€ / km", perKm(o.eurKm)]);
+    if (o.eurH != null) rows.push(["€ / heure", perKm(o.eurH)]);
     rows.push(["Jours", String(o.jours)]);
     rows.forEach(([a, b]) => {
       const s1 = document.createElement("span"); s1.textContent = a; const s2 = document.createElement("span"); s2.textContent = b; det.append(s1, s2);
