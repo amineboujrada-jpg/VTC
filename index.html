@@ -169,6 +169,7 @@
   .pair { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
   .pair small { color: var(--muted); font-size: 12px; }
   .pair input { font-size: 17px; padding: 12px 10px; margin-bottom: 6px; }
+  .linkbtn { display: block; width: 100%; margin: -2px 0 10px; padding: 9px 10px; border: 1px dashed var(--line); border-radius: 10px; background: transparent; color: var(--accent); font-size: 13px; font-weight: 600; text-align: left; }
   .pair-lbl { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; margin: 6px 0 5px; }
   .calc { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; background: var(--bg); border-radius: 12px; padding: 12px 14px; margin: 4px 0 12px; font-size: 14px; font-variant-numeric: tabular-nums; }
   .calc span:nth-child(even) { text-align: right; }
@@ -325,7 +326,7 @@
   const REC = ["uber", "bolt", "heetch", "prive", "pourboire"];
   const FIELDS = [
     { k: "uber", t: "Uber", g: "rec" }, { k: "bolt", t: "Bolt", g: "rec" }, { k: "heetch", t: "Heetch", g: "rec" },
-    { k: "prive", t: "Privé (cash)", g: "rec" }, { k: "pourboire", t: "Pourboire", g: "rec" },
+    { k: "prive", t: "Course privée", g: "rec" }, { k: "pourboire", t: "Pourboire", g: "rec" },
     { k: "carburant", t: "Carburant", g: "ch", charge: true, chips: [20, 30, 40, 50] },
     { k: "repas", t: "Repas / café", g: "ch", charge: true, chips: [2, 5, 10, 15] },
     { k: "heures", t: "Heures", g: "ch", unit: "h" }, { k: "km", t: "Km", g: "ch", unit: "km" }
@@ -609,6 +610,21 @@
     [now, prev].forEach(k => { const id = weekId(k); if (!map.has(id)) map.set(id, { id, y: k.y, m: k.m, s: k.s, ca: [0, 0, 0], cash: [0, 0, 0], recu: false, _new: true }); });
     return [...map.values()].sort((a, b) => (b.y * 1000 + b.m * 10 + b.s) - (a.y * 1000 + a.m * 10 + a.s)).filter(w => (w.y * 1000 + w.m * 10 + w.s) <= (now.y * 1000 + now.m * 10 + now.s));
   }
+  // Dates d'une semaine Virements (mois + S) : le dimanche du mois dont le numéro donne S
+  function weekRange(w) {
+    for (let d = 7 * (w.s - 1) + 1; d <= 7 * w.s; d++) {
+      const sun = new Date(w.y, w.m - 1, d);
+      if (sun.getMonth() === w.m - 1 && sun.getDay() === 0) return { mon: addDays(sun, -6), sun };
+    }
+    return null;
+  }
+  // Total Uber / Bolt / Heetch saisi dans le Journal pour la semaine
+  function journalWeekCa(w) {
+    const r = weekRange(w); if (!r) return [0, 0, 0];
+    const from = iso(r.mon), to = iso(r.sun), t = [0, 0, 0];
+    S.days.forEach(d => { if (d.date >= from && d.date <= to) ["uber", "bolt", "heetch"].forEach((k, i) => (t[i] += v(d, k))); });
+    return t.map(r2);
+  }
   const wkName = w => `${cap(MOIS[w.m - 1])} ${w.y} · S${w.s}`;
   // Frais de rattachement Baldi : ajoutés automatiquement aux dépenses quand la semaine a un CA
   async function ensureRattachement(w) {
@@ -639,12 +655,16 @@
   }
   function openVir(w) {
     const val = x => (x ? String(x).replace(".", ",") : "");
+    const jca = journalWeekCa(w), rg = weekRange(w);
+    const empty = !(w.ca || []).some(x => x > 0);
+    const caVals = empty ? jca : w.ca; // semaine vide : pré-rempli avec le Journal
     const inp = (id, x) => `<input id="${id}" type="text" inputmode="decimal" autocomplete="off" value="${val(x)}" placeholder="0">`;
     openSheet(`
       <h3>${wkName(w)}</h3>
-      <div class="cur">Montants de tes relevés Uber, Bolt et Heetch pour la semaine</div>
-      <div class="pair-lbl">Chiffre d'affaires</div>
-      <div class="pair"><div><small>Uber</small>${inp("ca0", w.ca[0])}</div><div><small>Bolt</small>${inp("ca1", w.ca[1])}</div><div><small>Heetch</small>${inp("ca2", w.ca[2])}</div></div>
+      <div class="cur">${rg ? `Du lundi ${pad(rg.mon.getDate())}/${pad(rg.mon.getMonth() + 1)} au dimanche ${pad(rg.sun.getDate())}/${pad(rg.sun.getMonth() + 1)}` : "Montants de tes relevés Uber, Bolt et Heetch"}</div>
+      <div class="pair-lbl">Chiffre d'affaires${empty && jca.some(x => x > 0) ? ' <span class="hint">· pré-rempli avec le Journal</span>' : ""}</div>
+      <div class="pair"><div><small>Uber</small>${inp("ca0", caVals[0])}</div><div><small>Bolt</small>${inp("ca1", caVals[1])}</div><div><small>Heetch</small>${inp("ca2", caVals[2])}</div></div>
+      ${!empty && jca.some(x => x > 0) && jca.some((x, i) => r2(x) !== r2(w.ca[i] || 0)) ? `<button class="linkbtn" id="fromJournal">↻ Reprendre le Journal : Uber ${eur(jca[0])} · Bolt ${eur(jca[1])} · Heetch ${eur(jca[2])}</button>` : ""}
       <div class="pair-lbl">Cash encaissé</div>
       <div class="pair"><div><small>Uber</small>${inp("cs0", w.cash[0])}</div><div><small>Bolt</small>${inp("cs1", w.cash[1])}</div><div><small>Heetch</small>${inp("cs2", w.cash[2])}</div></div>
       <div class="calc" id="calc"></div>
@@ -655,6 +675,7 @@
     const upd = () => { const c = weekCalc(draft());
       $("calc").innerHTML = `<span>CA total</span><span>${eur(c.ca)}</span><span>− Cash</span><span>${eur(c.cash)}</span><span>− Frais Baldi</span><span>${eur(c.frais)}</span><span class="big">Virement attendu</span><span class="big">${eur(c.vir)}</span>`; };
     $("sheet").querySelectorAll(".pair input").forEach(i => (i.oninput = upd)); upd();
+    if ($("fromJournal")) $("fromJournal").onclick = () => { jca.forEach((x, i) => ($("ca" + i).value = val(x))); $("fromJournal").remove(); upd(); };
     $("recu").onclick = () => $("recu").setAttribute("aria-pressed", $("recu").getAttribute("aria-pressed") === "true" ? "false" : "true");
     $("saveVir").onclick = async () => {
       const bad = ["ca0", "ca1", "ca2", "cs0", "cs1", "cs2"].some(id => $(id).value.trim() !== "" && !isFinite(parse($(id).value)));
@@ -705,7 +726,7 @@
       kmMonths.slice().reverse().forEach(m => { h += `<tr><td>${SHORT[m.d.getMonth()]} ${String(m.d.getFullYear()).slice(2)}</td><td>${Math.round(m.km).toLocaleString("fr-FR")}</td><td class="n">${perKm(m.eurKm)}</td></tr>`; });
       h += `<tr class="tot"><td>Total</td><td>${Math.round(kAll.km).toLocaleString("fr-FR")}</td><td class="n">${perKm(kAll.eurKm)}</td></tr></tbody></table></div>`;
     }
-    const plat = [["Uber", "uber"], ["Bolt", "bolt"], ["Heetch", "heetch"], ["Privé (cash)", "prive"], ["Pourboires cash", "pourboire"]]
+    const plat = [["Uber", "uber"], ["Bolt", "bolt"], ["Heetch", "heetch"], ["Courses privées", "prive"], ["Pourboires cash", "pourboire"]]
       .map(([n, k]) => { let s = 0; S.days.forEach(d => (s += v(d, k))); return [n, s]; });
     const catSum = c => S.deps.filter(x => x.cat === c).reduce((a, x) => a + x.montant, 0);
     let carb = 0, repas = 0; S.days.forEach(d => { carb += v(d, "carburant"); repas += v(d, "repas"); });
